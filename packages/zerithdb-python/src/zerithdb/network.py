@@ -8,8 +8,10 @@ from aiortc import RTCPeerConnection, RTCSessionDescription, RTCDataChannel
 
 logger = logging.getLogger(__name__)
 
+
 class NetworkManager:
     """Manages WebRTC peer-to-peer connections via a signaling server."""
+
     def __init__(self, signaling_url: str, local_peer_id: str):
         self.signaling_url = signaling_url
         self.local_peer_id = local_peer_id
@@ -38,18 +40,20 @@ class NetworkManager:
 
     async def _handle_signaling_message(self, msg: dict):
         msg_type = msg.get("type")
-        
+
         if msg_type == "peer-list":
             for remote_peer_id in msg.get("payload", []):
                 if remote_peer_id != self.local_peer_id:
                     await self._create_peer(remote_peer_id, initiator=True)
-                    
+
         elif msg_type == "offer":
             if msg.get("to") == self.local_peer_id:
                 remote_peer_id = msg.get("from")
                 offer = msg.get("payload")
-                await self._create_peer(remote_peer_id, initiator=False, offer_payload=offer)
-                
+                await self._create_peer(
+                    remote_peer_id, initiator=False, offer_payload=offer
+                )
+
         elif msg_type == "answer":
             remote_peer_id = msg.get("from")
             answer = msg.get("payload")
@@ -58,17 +62,19 @@ class NetworkManager:
                 await pc.setRemoteDescription(
                     RTCSessionDescription(sdp=answer["sdp"], type=answer["type"])
                 )
-                
+
         elif msg_type == "ice-candidate":
             remote_peer_id = msg.get("from")
             pc = self.peers.get(remote_peer_id)
             if pc:
-                # aiortc handles ICE candidates slightly differently, 
-                # but we can try to add it. In many aiortc setups, ICE candidates 
+                # aiortc handles ICE candidates slightly differently,
+                # but we can try to add it. In many aiortc setups, ICE candidates
                 # are bundled in SDP or handled directly.
                 pass
 
-    async def _create_peer(self, remote_peer_id: str, initiator: bool, offer_payload: dict = None):
+    async def _create_peer(
+        self, remote_peer_id: str, initiator: bool, offer_payload: dict = None
+    ):
         if remote_peer_id in self.peers:
             return
 
@@ -82,40 +88,46 @@ class NetworkManager:
         if initiator:
             channel = pc.createDataChannel("zerithdb-sync")
             self._setup_data_channel(remote_peer_id, channel)
-            
+
             offer = await pc.createOffer()
             await pc.setLocalDescription(offer)
-            
-            await self._send_signaling({
-                "type": "offer",
-                "from": self.local_peer_id,
-                "to": remote_peer_id,
-                "payload": {
-                    "sdp": pc.localDescription.sdp,
-                    "type": pc.localDescription.type
-                }
-            })
-        else:
-            if offer_payload:
-                await pc.setRemoteDescription(
-                    RTCSessionDescription(sdp=offer_payload["sdp"], type=offer_payload["type"])
-                )
-                answer = await pc.createAnswer()
-                await pc.setLocalDescription(answer)
-                
-                await self._send_signaling({
-                    "type": "answer",
+
+            await self._send_signaling(
+                {
+                    "type": "offer",
                     "from": self.local_peer_id,
                     "to": remote_peer_id,
                     "payload": {
                         "sdp": pc.localDescription.sdp,
-                        "type": pc.localDescription.type
+                        "type": pc.localDescription.type,
+                    },
+                }
+            )
+        else:
+            if offer_payload:
+                await pc.setRemoteDescription(
+                    RTCSessionDescription(
+                        sdp=offer_payload["sdp"], type=offer_payload["type"]
+                    )
+                )
+                answer = await pc.createAnswer()
+                await pc.setLocalDescription(answer)
+
+                await self._send_signaling(
+                    {
+                        "type": "answer",
+                        "from": self.local_peer_id,
+                        "to": remote_peer_id,
+                        "payload": {
+                            "sdp": pc.localDescription.sdp,
+                            "type": pc.localDescription.type,
+                        },
                     }
-                })
+                )
 
     def _setup_data_channel(self, remote_peer_id: str, channel: RTCDataChannel):
         self.channels[remote_peer_id] = channel
-        
+
         @channel.on("message")
         def on_message(message):
             if self.on_message:
