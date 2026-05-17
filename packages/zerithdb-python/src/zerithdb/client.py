@@ -1,6 +1,8 @@
 import logging
 import uuid
-from typing import Callable, Dict, Any, Awaitable
+from typing import Any, Awaitable, Callable, Dict
+
+import sentry_sdk
 
 from .network import NetworkManager
 
@@ -13,7 +15,9 @@ class ZerithClient:
     """
 
     def __init__(
-        self, signaling_url: str = "wss://arpitkhandelwal810-zerith-signaling.hf.space"
+        self,
+        signaling_url: str = "wss://arpitkhandelwal810-zerith-signaling.hf.space",
+        sentry_dsn: str = None,
     ):
         self.signaling_url = signaling_url
         self.peer_id = str(uuid.uuid4())
@@ -23,6 +27,10 @@ class ZerithClient:
 
         # Setup network callbacks
         self.network.on_message = self._handle_network_message
+
+        if sentry_dsn:
+            sentry_sdk.init(dsn=sentry_dsn, traces_sample_rate=1.0)
+            logger.info("Sentry crash reporting enabled.")
 
     async def connect(self, room_id: str):
         """Connect to the signaling server and join the room."""
@@ -56,6 +64,7 @@ class ZerithClient:
             event_name = (
                 f"{table}:updated" if record.get("_rev") else f"{table}:inserted"
             )
+
             if event_name in self.handlers:
                 await self.handlers[event_name](record)
 
@@ -70,6 +79,7 @@ class ZerithClient:
         self.db_state[table][data["id"]] = data
 
         msg = {"type": "sync:update", "payload": {"table": table, "record": data}}
+
         await self.network.broadcast(msg)
 
     async def update(self, table: str, record_id: str, data: dict):
@@ -82,6 +92,7 @@ class ZerithClient:
         record["_rev"] = record.get("_rev", 0) + 1
 
         msg = {"type": "sync:update", "payload": {"table": table, "record": record}}
+
         await self.network.broadcast(msg)
 
     async def wait_until_disconnected(self):
